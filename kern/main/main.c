@@ -50,6 +50,7 @@
 #include <test.h>
 #include <version.h>
 #include "autoconf.h"  // for pseudoconfig
+#include <hello.h>
 
 
 /*
@@ -104,6 +105,10 @@ boot(void)
 	kprintf("Put-your-group-name-here's system version %s (%s #%d)\n",
 		GROUP_VERSION, buildconfig, buildversion);
 	kprintf("\n");
+
+	#if OPT_HELLO
+		hello();
+	#endif
 
 	/* Early initialization. */
 	ram_bootstrap();
