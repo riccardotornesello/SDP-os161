@@ -376,7 +376,6 @@ file      vfs/devnull.c
 # calls assignment.)
 #
 
-file      syscall/file_syscalls.c
 file      syscall/loadelf.c
 file      syscall/runprogram.c
 file      syscall/time_syscalls.c
@@ -390,6 +389,9 @@ file      main/menu.c
 
 defoption hello
 optfile   hello  main/hello.c
+
+defoption syscalls
+optfile   syscalls  syscall/file_syscalls.c
 
 ########################################
 #                                      #
