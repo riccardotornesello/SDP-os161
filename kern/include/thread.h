@@ -107,6 +107,7 @@ struct thread {
 	 */
 
 	/* add more here as needed */
+	int t_retvalue; /* return value after exit() */
 };
 
 /*
