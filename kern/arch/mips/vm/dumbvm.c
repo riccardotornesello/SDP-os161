@@ -38,6 +38,8 @@
 #include <mips/tlb.h>
 #include <addrspace.h>
 #include <vm.h>
+#include <bitmap.h>
+#include "opt-memorymanagement.h"
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -64,10 +66,39 @@
  */
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
 
+/* Memory bitmap */
+#ifdef OPT_MEMORYMANAGEMENT
+bool memtableReady;
+unsigned long nRamFrames;
+struct bitmap *usedFramesTable;
+unsigned long *allocSize;
+#endif
+
 void
 vm_bootstrap(void)
 {
-	/* Do nothing. */
+#ifdef OPT_MEMORYMANAGEMENT
+	unsigned long usedRamFrames;
+
+	nRamFrames = ((int)ram_getsize()) / PAGE_SIZE;
+	usedFramesTable = bitmap_create(nRamFrames);
+	allocSize = kmalloc(sizeof(unsigned long)*nRamFrames);
+
+	spinlock_acquire(&stealmem_lock);
+	usedRamFrames = (unsigned long)ram_getfirstfree() / PAGE_SIZE;
+	/* Mark used frames and clean allocSize */
+	for(unsigned long i = 0; i < usedRamFrames; i++)
+	{
+		bitmap_mark(usedFramesTable, i);
+		allocSize[i] = 0;
+	}
+	for(unsigned long i = usedRamFrames; i < nRamFrames; i++)
+	{
+		allocSize[i] = 0;
+	}
+	memtableReady = true;
+	spinlock_release(&stealmem_lock);
+#endif
 }
 
 /*
@@ -94,11 +125,42 @@ static
 paddr_t
 getppages(unsigned long npages)
 {
-	paddr_t addr;
+	paddr_t addr = 0;
 
 	spinlock_acquire(&stealmem_lock);
 
+#ifdef OPT_MEMORYMANAGEMENT
+	unsigned long n;
+	if(memtableReady)
+	{
+		for(unsigned long first = 0; first <= nRamFrames - npages; first++)
+		{
+			if(!bitmap_isset(usedFramesTable, first))
+			{
+				for(n = 1; n < npages; n++) {
+					if(bitmap_isset(usedFramesTable, first+n))
+					{
+						first = first + n;
+						break;
+					}
+				}
+				if(n==npages)
+				{
+					addr = first * PAGE_SIZE;
+					for(unsigned long i = first; i < first + npages; i++) {
+						bitmap_mark(usedFramesTable, i);
+					}
+					allocSize[first] = npages;
+					break;
+				}
+			}
+		}
+	}
+	else 
+		addr = ram_stealmem(npages);
+#else /* OPT_MEMORYMANAGEMENT */
 	addr = ram_stealmem(npages);
+#endif /* OPT_MEMORYMANAGEMENT */
 
 	spinlock_release(&stealmem_lock);
 	return addr;
@@ -121,7 +183,19 @@ alloc_kpages(unsigned npages)
 void
 free_kpages(vaddr_t addr)
 {
-	/* nothing - leak the memory. */
+#ifdef OPT_MEMORYMANAGEMENT
+	unsigned long npages;
+	unsigned long first;
+
+	first = KVADDR_TO_PADDR(addr) / PAGE_SIZE;
+	npages = allocSize[first];
+
+	for (unsigned long i = first; i < first + npages; i++)
+	{
+		bitmap_unmark(usedFramesTable, i);
+	}
+	allocSize[first] = 0;
+#endif
 
 	(void)addr;
 }
