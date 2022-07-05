@@ -396,6 +396,10 @@ optfile   syscalls  syscall/proc_syscalls.c
 
 defoption memorymanagement
 
+defoption semlock
+
+defoption wchanlock
+
 ########################################
 #                                      #
 #             Filesystems              #

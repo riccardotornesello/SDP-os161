@@ -39,6 +39,8 @@
 #include <thread.h>
 #include <current.h>
 #include <synch.h>
+#include "opt-semlock.h"
+#include "opt-wchanlock.h"
 
 ////////////////////////////////////////////////////////////
 //
@@ -154,9 +156,24 @@ lock_create(const char *name)
                 return NULL;
         }
 
-	HANGMAN_LOCKABLEINIT(&lock->lk_hangman, lock->lk_name);
+        #ifdef OPT_SEMLOCK
+        lock->owner = NULL;
+        lock->sem = sem_create(name, 1);
 
-        // add stuff here as needed
+        #elif OPT_WCHANLOCK
+        lock->owner = NULL;
+        lock->lk_wchan = wchan_create(lock->lk_name);
+	if (lock->lk_wchan == NULL) {
+		kfree(lock->lk_name);
+		kfree(lock);
+		return NULL;
+	}
+
+	spinlock_init(&lock->lk_lock);
+        lock->lk_locked = false;
+        #endif
+
+	HANGMAN_LOCKABLEINIT(&lock->lk_hangman, lock->lk_name);
 
         return lock;
 }
@@ -166,7 +183,13 @@ lock_destroy(struct lock *lock)
 {
         KASSERT(lock != NULL);
 
-        // add stuff here as needed
+        #ifdef OPT_SEMLOCK
+        sem_destroy(lock->sem);
+
+        #elif OPT_WCHANLOCK
+        spinlock_cleanup(&lock->lk_lock);
+	wchan_destroy(lock->lk_wchan);
+        #endif
 
         kfree(lock->lk_name);
         kfree(lock);
@@ -175,26 +198,52 @@ lock_destroy(struct lock *lock)
 void
 lock_acquire(struct lock *lock)
 {
-	/* Call this (atomically) before waiting for a lock */
-	//HANGMAN_WAIT(&curthread->t_hangman, &lock->lk_hangman);
+        KASSERT(lock != NULL);
 
-        // Write this
+        #ifdef OPT_SEMLOCK
+        HANGMAN_WAIT(&curthread->t_hangman, &lock->lk_hangman);
+        P(lock->sem);
+        lock->owner = curthread;
+        HANGMAN_ACQUIRE(&curthread->t_hangman, &lock->lk_hangman);
 
-        (void)lock;  // suppress warning until code gets written
+        #elif OPT_WCHANLOCK
+        HANGMAN_WAIT(&curthread->t_hangman, &lock->lk_hangman);
+        spinlock_acquire(&lock->lk_lock);
+        while (lock->lk_locked) {
+		wchan_sleep(lock->lk_wchan, &lock->lk_lock);
+        }
+        lock->lk_locked = true;
+        lock->owner = curthread;
+	spinlock_release(&sem->sem_lock);
+        HANGMAN_ACQUIRE(&curthread->t_hangman, &lock->lk_hangman);
+        #endif
 
-	/* Call this (atomically) once the lock is acquired */
-	//HANGMAN_ACQUIRE(&curthread->t_hangman, &lock->lk_hangman);
+        (void)lock;
 }
 
 void
 lock_release(struct lock *lock)
-{
-	/* Call this (atomically) when the lock is released */
-	//HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
+{        
+        KASSERT(lock != NULL);
 
-        // Write this
+        #ifdef OPT_SEMLOCK
+        KASSERT(curthread == lock->owner);
+        lock->owner = NULL;
+        V(lock->sem);
+        HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
 
-        (void)lock;  // suppress warning until code gets written
+        #elif OPT_WCHANLOCK
+        KASSERT(curthread == lock->owner);
+        spinlock_acquire(&lock->lk_lock);
+        lock->owner = NULL;
+        lock->lk_locked = true;
+	wchan_wakeone(lock->lk_wchan, &lock->lk_lock);
+	spinlock_release(&lock->lk_lock);
+        HANGMAN_RELEASE(&curthread->t_hangman, &lock->lk_hangman);
+
+        #endif
+
+        (void)lock;
 }
 
 bool

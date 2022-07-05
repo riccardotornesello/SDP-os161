@@ -35,7 +35,10 @@
  */
 
 
+#include <thread.h>
 #include <spinlock.h>
+#include "opt-semlock.h"
+#include "opt-wchanlock.h"
 
 /*
  * Dijkstra-style semaphore.
@@ -75,8 +78,17 @@ void V(struct semaphore *);
 struct lock {
         char *lk_name;
         HANGMAN_LOCKABLE(lk_hangman);   /* Deadlock detector hook. */
-        // add what you need here
-        // (don't forget to mark things volatile as needed)
+        
+        #ifdef OPT_SEMLOCK
+        struct thread *owner;
+	struct semaphore *sem;
+
+        #elif OPT_WCHANLOCK
+        struct thread *owner;
+	struct wchan *lk_wchan;
+	struct spinlock lk_lock;
+        volatile bool lk_locked;
+        #endif
 };
 
 struct lock *lock_create(const char *name);
